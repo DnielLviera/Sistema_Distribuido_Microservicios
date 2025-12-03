@@ -1,0 +1,5 @@
+/home/dante/git-repos/Sistema_Distribuido_Microservicios/inventory-service/target/debug/deps/equivalent-306dc95e9e1dff7a.d: /home/dante/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/equivalent-1.0.2/src/lib.rs
+
+/home/dante/git-repos/Sistema_Distribuido_Microservicios/inventory-service/target/debug/deps/libequivalent-306dc95e9e1dff7a.rmeta: /home/dante/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/equivalent-1.0.2/src/lib.rs
+
+/home/dante/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/equivalent-1.0.2/src/lib.rs:

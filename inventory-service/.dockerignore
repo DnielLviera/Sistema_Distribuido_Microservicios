@@ -1,4 +1,6 @@
 target/
 .git/
-*.log
-Cargo.lock
+.gitignore
+README.md
+*.db
+.env

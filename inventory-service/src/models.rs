@@ -1,11 +1,10 @@
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, FromRow)]
 pub struct InventoryItem {
-    pub product_id: u32,
+    pub product_id: i32,
     pub stock: i32,
-    pub min_stock: i32,
-    pub max_stock: i32,
     pub product_name: String,
 }
 

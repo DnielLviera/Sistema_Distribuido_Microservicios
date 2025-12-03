@@ -1,6 +1,7 @@
 mod models;
 mod handlers;
 mod auth;
+mod database;
 
 use axum::{
     routing::{get, post},
@@ -9,15 +10,17 @@ use axum::{
     http::Method,
 };
 use tower_http::cors::{CorsLayer, Any};
-use handlers::{InventoryState, load_inventory};
 use std::net::SocketAddr;
+use database::create_pool;
 
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
     
-    let inventory = InventoryState::new(std::sync::Mutex::new(load_inventory()));
-    
+    let pool = create_pool().await.expect("Failed to create pool");
+   
+    init_db(&pool).await;
+
     let cors = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_origin(Any)
@@ -37,7 +40,7 @@ async fn main() {
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
-        .with_state(inventory)
+        .with_state(pool)
         .layer(cors);
     
     let port = std::env::var("PORT")
@@ -45,10 +48,45 @@ async fn main() {
         .parse()
         .unwrap_or(8002);
     
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     
     println!("Inventory Service corriendo en http://{}", addr);
     
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn init_db(pool: &sqlx::PgPool) {
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS products (
+            product_id SERIAL PRIMARY KEY,
+            product_name VARCHAR(255) NOT NULL,
+            stock INTEGER NOT NULL DEFAULT 0
+        )
+        "#
+    )
+    .execute(pool)
+    .await
+    .expect("Failed to create table");
+    
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM products")
+        .fetch_one(pool)
+        .await
+        .expect("Failed to count products");
+    
+    if count.0 == 0 {
+        sqlx::query(
+            r#"
+            INSERT INTO products (product_name, stock) VALUES
+            ('Laptop', 10),
+            ('Mouse', 50),
+            ('Teclado', 30),
+            ('Monitor', 15)
+            "#
+        )
+        .execute(pool)
+        .await
+        .expect("Failed to insert sample data");
+    }
 }

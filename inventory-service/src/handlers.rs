@@ -3,101 +3,71 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use std::sync::{Arc, Mutex};
+use sqlx::PgPool;
 use crate::models::{InventoryItem, StockUpdate};
 
-pub type InventoryState = Arc<Mutex<Vec<InventoryItem>>>;
-
-pub fn load_inventory() -> Vec<InventoryItem> {
-    if let Ok(file_content) = std::fs::read_to_string("inventory.json") {
-        match serde_json::from_str::<Vec<InventoryItem>>(&file_content) {
-            Ok(inventory) => {
-                println!("JSON parseado correctamente, {} items", inventory.len());
-                inventory
-            },
-            Err(e) => {
-                println!("Error parseando JSON: {}", e);
-                vec![]
-            }
-        }
-    } else {
-        println!("Archivo inventory.json no encontrado");
-        vec![]
-    }
-}
-
-pub fn save_inventory(inventory: &[InventoryItem]) -> Result<(), std::io::Error> {
-    let json = serde_json::to_string_pretty(inventory)?;
-    std::fs::write("inventory.json", json)
-}
+pub type DbState = PgPool;
 
 // GET /inventory - Obtener todo el inventario
 pub async fn get_inventory(
-    State(inventory): State<InventoryState>
-) -> Json<Vec<InventoryItem>> {
-    let inventory = inventory.lock().unwrap();
-    Json(inventory.clone())
+    State(pool): State<DbState>
+) -> Result<Json<Vec<InventoryItem>>, StatusCode> {
+    let items = sqlx::query_as::<_, InventoryItem>("SELECT product_id, stock, product_name FROM products ORDER BY product_id")
+        .fetch_all(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    Ok(Json(items))
 }
 
 // GET /inventory/{product_id} - Obtener stock de un producto
 pub async fn get_product_stock(
-    Path(product_id): Path<u32>,
-    State(inventory): State<InventoryState>
+    Path(product_id): Path<i32>,
+    State(pool): State<DbState>
 ) -> Result<Json<InventoryItem>, StatusCode> {
-    let inventory = inventory.lock().unwrap();
+    let item = sqlx::query_as::<_, InventoryItem>(
+        "SELECT product_id, stock, product_name FROM products WHERE product_id = $1"
+    )
+    .bind(product_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
-    inventory
-        .iter()
-        .find(|item| item.product_id == product_id)
-        .map(|item| Json(item.clone()))
-        .ok_or(StatusCode::NOT_FOUND)
+    item.map(Json).ok_or(StatusCode::NOT_FOUND)
 }
 
 // POST /inventory/{product_id}/increase - Aumentar stock
 pub async fn increase_stock(
-    Path(product_id): Path<u32>,
-    State(inventory): State<InventoryState>,
+    Path(product_id): Path<i32>,
+    State(pool): State<DbState>,
     Json(update): Json<StockUpdate>,
 ) -> Result<Json<InventoryItem>, StatusCode> {
-    let item_clone = {
-        let mut inventory_guard = inventory.lock().unwrap();
-        
-        if let Some(item) = inventory_guard.iter_mut().find(|item| item.product_id == product_id) {
-            item.stock += update.quantity;
-            item.clone()
-        } else {
-            return Err(StatusCode::NOT_FOUND);
-        }
-    };
+    let item = sqlx::query_as::<_, InventoryItem>(
+        "UPDATE products SET stock = stock + $1 WHERE product_id = $2 RETURNING product_id, stock, product_name"
+    )
+    .bind(update.quantity)
+    .bind(product_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
-    let inventory_guard = inventory.lock().unwrap();
-    save_inventory(&inventory_guard).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    Ok(Json(item_clone))
+    item.map(Json).ok_or(StatusCode::NOT_FOUND)
 }
 
 // POST /inventory/{product_id}/decrease - Disminuir stock
 pub async fn decrease_stock(
-    Path(product_id): Path<u32>,
-    State(inventory): State<InventoryState>,
+    Path(product_id): Path<i32>,
+    State(pool): State<DbState>,
     Json(update): Json<StockUpdate>,
 ) -> Result<Json<InventoryItem>, StatusCode> {
-    let item_clone = {
-        let mut inventory_guard = inventory.lock().unwrap();
-        
-        if let Some(item) = inventory_guard.iter_mut().find(|item| item.product_id == product_id) {
-            item.stock -= update.quantity;
-            if item.stock < 0 {
-                item.stock = 0;
-            }
-            item.clone()
-        } else {
-            return Err(StatusCode::NOT_FOUND);
-        }
-    };
+    let item = sqlx::query_as::<_, InventoryItem>(
+        "UPDATE products SET stock = GREATEST(stock - $1, 0) WHERE product_id = $2 RETURNING product_id, stock, product_name"
+    )
+    .bind(update.quantity)
+    .bind(product_id)
+    .fetch_optional(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
-    let inventory_guard = inventory.lock().unwrap();
-    save_inventory(&inventory_guard).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    
-    Ok(Json(item_clone))
+    item.map(Json).ok_or(StatusCode::NOT_FOUND)
 }
